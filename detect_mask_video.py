@@ -13,14 +13,46 @@ import time
 import cv2
 import os
 import serial
+from flask import Flask,Response,render_template
+import threading
 
 #configure serial
-ser = serial.Serial('COM7', 9800, timeout=1)
+#ser = serial.Serial('COM7', 9800, timeout=1)
+app = Flask(__name__)
+# construct the argument parser and parse the arguments
+def runner():
+	global vs, faceNet, maskNet, args
+	ap = argparse.ArgumentParser()
+	ap.add_argument("-f", "--face", type=str,
+		default="face_detector",
+		help="path to face detector model directory")
+	ap.add_argument("-m", "--model", type=str,
+		default="mask_detector.model",
+		help="path to trained face mask detector model")
+	ap.add_argument("-c", "--confidence", type=float, default=0.5,
+		help="minimum probability to filter weak detections")
+	args = vars(ap.parse_args())
+
+	# load our serialized face detector model from disk
+	print("[INFO] loading face detector model...")
+	prototxtPath = os.path.sep.join([args["face"], "deploy.prototxt"])
+	weightsPath = os.path.sep.join([args["face"],
+		"res10_300x300_ssd_iter_140000.caffemodel"])
+	faceNet = cv2.dnn.readNet(prototxtPath, weightsPath)
+
+	# load the face mask detector model from disk
+	print("[INFO] loading face mask detector model...")
+	maskNet = load_model(args["model"])
+
+	# initialize the video stream and allow the camera sensor to warm up
+	print("[INFO] starting video stream...")
+	vs = cv2.VideoCapture(0)
+
 
 def detect_and_predict_mask(frame, faceNet, maskNet):
 	# grab the dimensions of the frame and then construct a blob
 	# from it
-	(h, w) = frame.shape[:2]
+	(h, w, channels) = frame.shape
 	blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300),
 		(104.0, 177.0, 123.0))
 
@@ -79,82 +111,73 @@ def detect_and_predict_mask(frame, faceNet, maskNet):
 	# locations
 	return (locs, preds)
 
-# construct the argument parser and parse the arguments
-ap = argparse.ArgumentParser()
-ap.add_argument("-f", "--face", type=str,
-	default="face_detector",
-	help="path to face detector model directory")
-ap.add_argument("-m", "--model", type=str,
-	default="mask_detector.model",
-	help="path to trained face mask detector model")
-ap.add_argument("-c", "--confidence", type=float, default=0.5,
-	help="minimum probability to filter weak detections")
-args = vars(ap.parse_args())
 
-# load our serialized face detector model from disk
-print("[INFO] loading face detector model...")
-prototxtPath = os.path.sep.join([args["face"], "deploy.prototxt"])
-weightsPath = os.path.sep.join([args["face"],
-	"res10_300x300_ssd_iter_140000.caffemodel"])
-faceNet = cv2.dnn.readNet(prototxtPath, weightsPath)
 
-# load the face mask detector model from disk
-print("[INFO] loading face mask detector model...")
-maskNet = load_model(args["model"])
-
-# initialize the video stream and allow the camera sensor to warm up
-print("[INFO] starting video stream...")
-vs = VideoStream(src=0).start()
-time.sleep(2.0)
 
 # loop over the frames from the video stream
-while True:
-	# grab the frame from the threaded video stream and resize it
-	# to have a maximum width of 400 pixels
-	frame = vs.read()
-	frame = imutils.resize(frame, width=900)
+def generate_frames():
+	runner()
+	while True:
+		# grab the frame from the threaded video stream and resize it
+		# to have a maximum width of 400 pixels
+		success, frame = vs.read()
+		if not success:
+			continue
 
-	# detect faces in the frame and determine if they are wearing a
-	# face mask or not
-	(locs, preds) = detect_and_predict_mask(frame, faceNet, maskNet)
+		if frame.shape[0] > 0 and frame.shape[1] > 0:
+			frame = cv2.resize(frame, (640, 480))
 
-	# loop over the detected face locations and their corresponding
-	# locations
-	for (box, pred) in zip(locs, preds):
-		# unpack the bounding box and predictions
-		(startX, startY, endX, endY) = box
-		(mask, withoutMask) = pred
+		# detect faces in the frame and determine if they are wearing a
+		# face mask or not
+		(locs, preds) = detect_and_predict_mask(frame, faceNet, maskNet)
 
-		#using serial port
-		temperature = str(ser.readline()).strip("b'\\r\\n")
-		print(temperature)
+		# loop over the detected face locations and their corresponding
+		# locations
+		for (box, pred) in zip(locs, preds):
+			# unpack the bounding box and predictions
+			(startX, startY, endX, endY) = box
+			(mask, withoutMask) = pred
 
-		# determine the class label and color we'll use to draw
-		# the bounding box and text
-		label = "Mask" if mask > withoutMask else "No Mask"
-		color = (0, 255, 0) if label == "Mask" else (0, 0, 255)
+			#using serial port
+			temperature="0";
+			#temperature = str(ser.readline()).strip("b'\\r\\n")
+
+
+			# determine the class label and color we'll use to draw
+			# the bounding box and text
+			label = "Mask" if mask > withoutMask else "No Mask"
+			color = (0, 255, 0) if label == "Mask" else (0, 0, 255)
+				
+			# include the probability in the label
+			label = "{}: {:.2f}%".format(label, max(mask, withoutMask) * 100)
+			label = label + ", temperature: " + temperature
+			health_status = "temperature is normal" if float(temperature) <= 37 else "go visit doctor in COVID testing center"
+			label = label + ", [fever status]: "+ health_status
 			
-		# include the probability in the label
-		label = "{}: {:.2f}%".format(label, max(mask, withoutMask) * 100)
-		label = label + ", temperature: " + temperature
-		health_status = "temperature is normal" if float(temperature) <= 37 else "go visit doctor in COVID testing center"
-		label = label + ", [fever status]: "+ health_status
-		
-		# display the label and bounding box rectangle on the output
-		# frame
-		cv2.putText(frame, label, (startX - 150, startY - 10),
-			cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
-		cv2.rectangle(frame, (startX, startY), (endX, endY), color, 2)
+			# display the label and bounding box rectangle on the output
+			# frame
+			cv2.putText(frame, label, (startX - 150, startY - 10),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
+			cv2.rectangle(frame, (startX, startY), (endX, endY), color, 2)
 
-	# show the output frame
-	cv2.imshow("Frame", frame)
-	key = cv2.waitKey(1) & 0xFF
+			ret, buffer = cv2.imencode('.jpg', frame)
+			frame = buffer.tobytes()
+			yield (b'--frame\r\n'
+				b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-	# if the `q` key was pressed, break from the loop
-	if key == ord("q"):
-		break
+
+# define the route for the video feed
+@app.route('/')
+def home():
+    return render_template("home.html")
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+if __name__ == '__main__':
+    app.run(debug=True)
+    
 
 # do a bit of cleanup
-ser.close()
-cv2.destroyAllWindows()
-vs.stop()
+#ser.close()
+
