@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html>
 <head>
 	<title>Mask and temperature detection</title>
@@ -13,3 +13,26 @@
 	<img id="video-feed" src="{{ url_for('video_feed') }}">
 </body>
 </html>
+ -->
+
+
+<!-- ----------------------- new addition -------------------- -->
+
+<!-- This page Extends the base.html template -->
+{% extends 'base.html' %}
+
+<!-- Page Title -->
+{% block title %} home {% endblock title %}
+
+<!-- Page Body -->
+{% block body %}
+
+<div class="card text-center">
+  <div class="card-body">
+    <h5 class="card-title">Welcome</h5>
+    <p class="card-text">Face mask detection system</p>
+    <a href="//video_feed" class="btn btn-primary">Go</a>
+  </div>
+</div>
+
+{% endblock body %}
