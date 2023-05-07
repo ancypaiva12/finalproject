@@ -1,0 +1,22 @@
+<!-- This page Extends the base.html template -->
+{% extends 'base.html' %}
+
+<!-- Page Title -->
+{% block title %} home {% endblock title %}
+
+<!-- Page Body -->
+{% block body %}
+
+<div class="card" style="width: 40rem">
+  <img src="{{ url_for('video_feed') }}" class="card-img-top" alt="video feedback" />
+  <div class="card-body">
+    <h5 class="card-title">Current Status</h5>
+    <p class="card-text">
+      Some quick example text to build on the card title and make up the bulk of
+      the card's content.
+    </p>
+    <a href="/" class="btn btn-primary">Cancel</a>
+  </div>
+</div>
+
+{% endblock body %}
